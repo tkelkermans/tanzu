@@ -23,8 +23,9 @@
     - [Kubectl et Tanzu completion](#kubectl-et-tanzu-completion)
   - [Tanzu Kubernetes Grid Deployment](#tanzu-kubernetes-grid-deployment)
     - [Prerequisites](#prerequisites)
-    - [SSH Keys](#ssh-keys)
-    - [LDAPS](#ldaps)
+      - [SSH Port Forwarding](#ssh-port-forwarding)
+      - [SSH Key](#ssh-key)
+    - [Deploy the management cluster](#deploy-the-management-cluster)
     - [Tips](#tips)
   - [Tanzu Kubernetes Grid Post Deployment](#tanzu-kubernetes-grid-post-deployment)
     - [Pinniped](#pinniped)
@@ -243,13 +244,70 @@ vmware@tkg-jump:~$ tanzu completion bash > ~/.kube-tkg/completion.bash.inc
 <!-- pagebreak -->
 ## Tanzu Kubernetes Grid Deployment
 
+To deploy your first TKG management cluster, you have to have :
+- NSX ALB deployed and configured
+- A bootstrap VM with all the required tools installed (docker, kubectl...). We use an Ubuntu VM in our scenario
+
+First we are going to use the UI installer, as it will help us fill the YAML file to configure the management cluster.
+Before finishing and running the installation with the UI, we are going to use the command line provided to effectively launch the deployment. It will allow us to have a better verbosity on what happens on the background.
+
 ### Prerequisites
 
-### SSH Keys
+#### SSH Port Forwarding
+If you run the UI installer on the VM or a Linux that doesn't have a browser, it can be helpful to redirect the port 8080 of the bootstrap VM to your machine. For this, execute the following command on **your machine**.
+```
+ssh -L 8080:localhost:8080 vmware@10.30.228.17
+```
 
-### LDAPS
+#### SSH Key
 
-**Important to specify UserPrincipalName, even if optional. If you don't do it, the deployment of Pinniped won't work**
+To create an SSH Key pair that is going to be used for tanzu, follow these steps on a Linux machine :
+```
+ssh-keygen -t ed25519 -C "vmware@tkg" -f ~/tkg
+```
+Both public and private keys are created on the home folder under the name tkg and tkg.pub
+
+### Deploy the management cluster
+1. On the bootstrap VM, execute the following command :
+  ```
+  tanzu management-cluster create --ui
+  ```
+2. Access the UI with a web browser http://localhost:8080/#/ui (either on your machine or on the bootstrap VM. See Section [SSH Port Forwarding](#ssh-port-forwarding))
+3. Fill in the vCenter information and credentials, as well as the public key you created on section [SSH Key](#ssh-key)
+   1. Select **Deploy TKG Management Cluster**
+4. Click on the tile you want (either Development or Production), and select the Instance Type. Select NSX Advanced Load Balancer as the **Control Plane Endpoint Provider**
+  ![](images/tkg-deploy-01.png)
+5. Insert the FQDN of the AVI Controller VIP, the username and password. Add the Root CA certificate that was used to sign the AVI controller certificate in section [Certificate](#certificate)
+   1. Click on Verify
+   2. Select the Cloud we created, the Default SE and the Front-End Network
+    ![](images/tkg-deploy-02.png)
+6. Add Metadata (not mandatory)
+7. Select the VM Folder where the K8s VMs will be deployed, as we as the Datastore and resource pool
+   ![](images/tkg-deploy-03.png)
+8. Select the Network that will be used for Kubernetes VMs. **It's our Management K8s network here, the one that requires a DHCP**
+   ![](images/tkg-deploy-04.png)
+9. Choose if you want to have LDAP or OIDC authentication here.
+   1.  For LDAPS, find the instruction bellow :
+       1.  Fill in the LDAPS Endpoint, BIND DN, BIND Password, **Username (UserPrincipalName)**, **User Attribute (UserPrincipalName)**, and RootCA. Other are optional
+      ![](images/tkg-deploy-05.png)
+10. Select the OS image you want to use
+11. (Optional) Register with TMC
+12. Click on **Review Configuration**
+
+**For LDAPS Identity Management, It's important to specify UserPrincipalName, even if optional. If you don't do it, the deployment of Pinniped won't work**
+
+When you clicked on **Review Configuration**, it automatically created the YAML file that contains all the information you provided via the UI.
+We are going to use it to deploy the management cluster with more verbosity.
+Copy the CLI command at the bottom of the page and paste it and execute it on your bootstrap VM.
+
+Example :
+```
+tanzu management-cluster create --file /home/vmware/.config/tanzu/tkg/clusterconfigs/201puronh8.yaml -v 6
+```
+
+Once you execute this command, it's going to ask you to questions:
+1. Reply N for the first one (*Do you want to configure vSphere with Tanzu?*)
+2. Reply Y for the second (*Would you like to deploy a non-integrated Tanzu Kubernetes Grid management cluster on vSphere 7.0? [y/N]*)
 
 ### Tips
 
