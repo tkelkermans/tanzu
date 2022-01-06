@@ -1,6 +1,7 @@
 # TKG 1.4 with NSX-ALB (vSphere Network)
 
 - [TKG 1.4 with NSX-ALB (vSphere Network)](#tkg-14-with-nsx-alb-vsphere-network)
+  - [Important note](#important-note)
   - [NSX ALB deployment](#nsx-alb-deployment)
     - [Network Configuration Planning](#network-configuration-planning)
     - [Network Configuration](#network-configuration)
@@ -9,6 +10,7 @@
       - [Management Network](#management-network)
     - [Controller Deployment](#controller-deployment)
     - [Initial Configuration](#initial-configuration)
+    - [Form the cluster](#form-the-cluster)
     - [Patching](#patching)
     - [Cloud Configuration](#cloud-configuration)
     - [SE Configuration](#se-configuration)
@@ -29,6 +31,10 @@
     - [Ingress](#ingress)
 
 <!-- pagebreak -->
+## Important note
+
+==**Please make sure to read the official VMware documentation as well. Especially the one related to the specific version you're going to deploy.Tanzu Kubernetes Grid is a work in progress and lots of procedures change between each release**==
+
 ## NSX ALB deployment
 
 NSX ALB (also known as AVI Networks) is a distributed load balancer that can be used for Tanzu environments.
@@ -90,8 +96,29 @@ We need at least **6** IP addresses available on this network:
 
 **Before deploying, create DNS records. It's mandatory to have a working cluster, especially when you want to upgrade it.**
 
+1. Create the DNS records
+![](images/avi-dns-records.png)
+2. Download AVI Controller OVAs from VMware site (TKG download page). **Make sure to download the version specified on the TKG Documentation (version 20.1.6 or 20.1.3 for TKG 1.4)**
+3. Deploy **3** times the same OVA to form a cluster
+  ![](images/avi-ova-deploy.png)
+4. Power On each controller
 
 ### Initial Configuration
+
+1. Using your browser, connect to one controller
+2. Set the new admin password
+  ![](images/avi-ctr-password.png)
+3. Enter the passphrase, DNS resolver, DNS Search Domain, SMTP information
+  ![](images/avi-ctr-initial.png)
+4. On the Multi-Tenant part, let the default settings
+
+**Make sure to do this for only one controller before going to the next step**
+### Form the cluster
+1. Connect to the controller you previously configured via its web admin interface
+2. Go to Administration > Controller > Nodes and click the Edit button
+  ![](images/avi-ctr-cluster-01.png)
+2. Fill the form to create the cluster
+  ![](images/avi-ctr-cluster-02.png)
 
 ### Patching
 
