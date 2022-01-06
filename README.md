@@ -13,8 +13,8 @@
     - [Form the cluster](#form-the-cluster)
     - [Patching](#patching)
     - [Cloud Configuration](#cloud-configuration)
-    - [SE Configuration](#se-configuration)
     - [IPAM and DNS profiles](#ipam-and-dns-profiles)
+    - [SE Configuration](#se-configuration)
     - [Certificate](#certificate)
     - [License](#license)
     - [Routing](#routing)
@@ -99,7 +99,8 @@ We need at least **6** IP addresses available on this network:
 1. Create the DNS records
 ![](images/avi-dns-records.png)
 2. Download AVI Controller OVAs from VMware site (TKG download page). **Make sure to download the version specified on the TKG Documentation (version 20.1.6 or 20.1.3 for TKG 1.4)**
-3. Deploy **3** times the same OVA to form a cluster
+3. Download the latest patch corresponding to the release of NSX ALB you selected
+4. Deploy **3** times the same OVA to form a cluster
   ![](images/avi-ova-deploy.png)
 4. Power On each controller
 
@@ -117,22 +118,65 @@ We need at least **6** IP addresses available on this network:
 1. Connect to the controller you previously configured via its web admin interface
 2. Go to Administration > Controller > Nodes and click the Edit button
   ![](images/avi-ctr-cluster-01.png)
-2. Fill the form to create the cluster
+3. Fill the form to create the cluster
   ![](images/avi-ctr-cluster-02.png)
+4. Wait 5 minutes for the process of cluster creation to start
 
 ### Patching
+Once the cluster is running, we can patch it with the latest version we found on the NSX ALB download site.
+1. Go to **Administration > Controller > Software**. And click **Upload From Computer**
+2. Select the patch you previously downloaded
+3. Once the transfert is complete, go to **Administration > Controller > System Update**
+4. Select the patch and click on **Upgrade**
+  ![](images/avi-ctr-upgrade.png)
+5. Leave all options by default and click on **Continue** and **Confirm**
 
 ### Cloud Configuration
+The next step is to configure the Cloud. In our case, our vCenter and networks related to it.
+The Management Network we are going to configure in this wizzard will be used as the Management interface for all AVI Service Engines (SE).
+1. Go to **Infrastructure > Clouds**. Click on **Create > VMware vCenter/vSphere ESX**
+2. Fill in the name (the name of the vCenter in our case)
+3. Fill in the login informations and let all other options by default.
+    ![](images/avi-ctr-cloud-01.png)
+4. Select the Datacenter and leave all other options by default
+5. Select the Management Network, the Default Service Engine Group and fill in the information for the management IP adresses that will be used for AVI SE.
+  ![](images/avi-ctr-cloud-02.png)
 
-### SE Configuration
+==For each subnet to be configured on NSX ALB, use the real CIDR instead of the one you can see on NSX-T interface (which is the GW address instead of the CIDR)==
 
 ### IPAM and DNS profiles
+In this step, we are going to create IPAM and DNS profiles. The IPAM profile will be used to provide VIPs addresses in the front-end network *(mgmt-k8s-ingress)*.
+1. Go to **Templates > Profiles > IPAM/DNS profiles** and click on **Create > IPAM Profile**
+2. Fill in the name and click on + Add Usable Network and select the front-end Network
+  ![](images/avi-ctr-ipam.png)
+3. Go to **Templates > Profiles > IPAM/DNS profiles** and click on **Create > DNS Profile**
+4. Give a name to the template and insert the domain name you want to use
+  ![](images/avi-ctr-dns.png)
+5. Go back to **Infrastructure > Clouds** and click on the Cloud we previously created.
+6. On the Infrastructure tab, select the IPAM and DNS profiles we just created.
+  ![](images/avi-ctr-cloud-03.png)
+7. Go to **Infrastructure > Networks** and click on the edit button of the Front-End network (*mgmt-k8s-ingress*)
+8. Click on **+Add Subnet**, and fill in the CIDR of the Front-End network (*10.30.230.64/27*)
+9. The click on **+Add Static IP Address Pool**, and fill the IP range you want for your Front-End IP addresses (*10.30.230.66-10.30.230.90*)
+  ![](images/avi-ctr-ipam-02.png)
+
+### SE Configuration
+AVI Service Engines will be deployed automatically, through AKO. We need to configure some settings to be sure that the SE will be deployed on the correct datastore, with a name we chose.
+1. Go to **Infrastructure > Service Engine Group**, select the Cloud (at the top of the page) and edit the Default-Group
+2. Click on the **Advanced** Tab
+3. Select the prefix you want to use, the vSphere Cluster, and the datastore
+  ![](images/avi-ctr-se.png)
 
 ### Certificate
+Follow VMware's documentation for the certificate. There is no trap for this one
 
 ### License
+Follow VMware's documentation for License. There is no trap for this one
 
 ### Routing
+1. Go to **Infrastructure > Routing > Select Cloud : *Your Cloud*** and click **Create**
+2. Insert 0.0.0.0/0 as the **Gateway subnet** and insert the gateway of the Front-End subnet as the **Next Hop**
+  ![](images/avi-ctr-routing.png)
 
 <!-- pagebreak -->
 ## Preparing an Ubuntu VM
