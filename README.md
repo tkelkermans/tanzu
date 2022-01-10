@@ -319,7 +319,7 @@ After the management cluster has been deployed, you need to execute some command
 
 1. Get the admin context 
   ```
-  tanzu management-cluster kubeconfig get *tkg-mgmt* --admin
+  tanzu management-cluster kubeconfig get tkg-mgmt --admin
   ```
 2. The command line will return the command to authenticate to the management cluster as admin (creation of a Kubernetes context)
 3. Execute this command, e.g.
@@ -379,7 +379,7 @@ After deploying the management cluster, we need to create a load balancer servic
   ```   
 4. Patch the mgmt-pinniped-addon secret, which contains the Pinniped configuration values, with the overlay values (replace mgmt-pinniped-addon with the result of step 3 ; replace OVERLAY-BASE64 with the output of the step 2):
   ```
-  kubectl patch secret *mgmt-pinniped-addon* -n tkg-system -p '{"data": {"overlays.yaml": "**OVERLAY-BASE64**"}}'
+  kubectl patch secret mgmt-pinniped-addon -n tkg-system -p '{"data": {"overlays.yaml": "OVERLAY-BASE64"}}'
   ```
 5. After a few seconds, list the pinniped-supervisor (and dexsvc if using LDAP) services to confirm that they now have type LoadBalancer:
   ```
