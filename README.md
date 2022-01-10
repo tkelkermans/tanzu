@@ -26,10 +26,12 @@
       - [SSH Port Forwarding](#ssh-port-forwarding)
       - [SSH Key](#ssh-key)
     - [Deploy the management cluster](#deploy-the-management-cluster)
-    - [Tips](#tips)
   - [Tanzu Kubernetes Grid Post Deployment](#tanzu-kubernetes-grid-post-deployment)
+    - [Authenticate as admin on the Management Cluster](#authenticate-as-admin-on-the-management-cluster)
+    - [Verify that all apps where deployed successfully](#verify-that-all-apps-where-deployed-successfully)
     - [Pinniped](#pinniped)
-    - [Ingress](#ingress)
+  - [Deploying Guest Clusters](#deploying-guest-clusters)
+    - [Create KubeConfig files for Cluster Access](#create-kubeconfig-files-for-cluster-access)
 
 <!-- pagebreak -->
 ## Important note
@@ -309,10 +311,90 @@ Once you execute this command, it's going to ask you to questions:
 1. Reply N for the first one (*Do you want to configure vSphere with Tanzu?*)
 2. Reply Y for the second (*Would you like to deploy a non-integrated Tanzu Kubernetes Grid management cluster on vSphere 7.0? [y/N]*)
 
-### Tips
-
 ## Tanzu Kubernetes Grid Post Deployment
+
+After the management cluster has been deployed, you need to execute some commands to be able to connect to it. Especially when you have deployed it with OIDC or LDAPS (Pinniped)
+
+### Authenticate as admin on the Management Cluster
+
+1. Get the admin context 
+  ```
+  tanzu management-cluster kubeconfig get *tkg-mgmt* --admin
+  ```
+2. The command line will return the command to authenticate to the management cluster as admin (creation of a Kubernetes context)
+3. Execute this command, e.g.
+  ```
+  kubectl config use-context tkg-mgmt-vsphere-20220106172239-admin@tkg-mgmt-vsphere-20220106172239
+  ```
+
+### Verify that all apps where deployed successfully 
+
+1. After connecting to the management cluster as admin ([Connect to the Management Cluster](#authenticate-as-admin-on-the-management-cluster))
+2. Verify that all apps are reconciled successfully
+  ```
+  kubectl get apps -A
+  ```
 
 ### Pinniped
 
-### Ingress
+After deploying the management cluster, we need to create a load balancer service for Pinniped.
+
+1. Create a file pinniped-supervisor-svc-overlay.yaml with the following content:
+  ```
+  #@ load("@ytt:overlay", "overlay")
+  #@overlay/match by=overlay.subset({"kind": "Service", "metadata": {"name": "pinniped-supervisor", "namespace": "pinniped-supervisor"}})
+  ---
+  #@overlay/replace
+  spec:
+    type: LoadBalancer
+    selector:
+      app: pinniped-supervisor
+    ports:
+      - name: https
+        protocol: TCP
+        port: 443
+        targetPort: 8443
+
+  #@ load("@ytt:overlay", "overlay")
+  #@overlay/match by=overlay.subset({"kind": "Service", "metadata": {"name": "dexsvc", "namespace": "tanzu-system-auth"}}), missing_ok=True
+  ---
+  #@overlay/replace
+  spec:
+    type: LoadBalancer
+    selector:
+      app: dex
+    ports:
+      - name: dex
+        protocol: TCP
+        port: 443
+        targetPort: https
+  ```
+2. Convert the file into a base64-encoded string:
+  ```
+  cat pinniped-supervisor-svc-overlay.yaml | base64 -w 0
+  ```
+3. Get the name of the pinniped-addon secret :
+  ```
+  kubectl get secrets -n tkg-system | grep pinniped-addon
+  ```   
+4. Patch the mgmt-pinniped-addon secret, which contains the Pinniped configuration values, with the overlay values (replace mgmt-pinniped-addon with the result of step 3 ; replace OVERLAY-BASE64 with the output of the step 2):
+  ```
+  kubectl patch secret *mgmt-pinniped-addon* -n tkg-system -p '{"data": {"overlays.yaml": "**OVERLAY-BASE64**"}}'
+  ```
+5. After a few seconds, list the pinniped-supervisor (and dexsvc if using LDAP) services to confirm that they now have type LoadBalancer:
+  ```
+  kubectl get services -n pinniped-supervisor
+  ```
+6. Delete pinniped-post-deploy-job to re-run it:
+  ```
+  kubectl delete jobs pinniped-post-deploy-job -n pinniped-supervisor
+  ```
+7. Wait for the Pinniped post-deploy job to re-create, run, and complete, which may take a few minutes. You can check status by kubectl get job:
+  ```
+  kubectl get job pinniped-post-deploy-job -n pinniped-supervisor
+  ```
+
+## Deploying Guest Clusters
+
+### Create KubeConfig files for Cluster Access
+
