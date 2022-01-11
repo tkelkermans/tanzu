@@ -20,7 +20,8 @@
     - [Routing](#routing)
   - [Preparing an Ubuntu VM](#preparing-an-ubuntu-vm)
     - [Docker installation](#docker-installation)
-    - [Kubectl et Tanzu completion](#kubectl-et-tanzu-completion)
+    - [Helm Installation](#helm-installation)
+    - [Kubectl, Tanzu & Helm completion](#kubectl-tanzu--helm-completion)
   - [Tanzu Kubernetes Grid Deployment](#tanzu-kubernetes-grid-deployment)
     - [Prerequisites](#prerequisites)
       - [SSH Port Forwarding](#ssh-port-forwarding)
@@ -30,6 +31,13 @@
     - [Authenticate as admin on the Management Cluster](#authenticate-as-admin-on-the-management-cluster)
     - [Verify that all apps where deployed successfully](#verify-that-all-apps-where-deployed-successfully)
     - [Pinniped](#pinniped)
+    - [Configure DNS Delegation (NSX ALB or External-DNS)](#configure-dns-delegation-nsx-alb-or-external-dns)
+      - [NSX ALB (Enterprise Edition)](#nsx-alb-enterprise-edition)
+      - [Windows DNS](#windows-dns)
+    - [Configure NSX ALB for Workload Clusters](#configure-nsx-alb-for-workload-clusters)
+      - [L7 Ingress controller (NSX ALB Enterprise Edition)](#l7-ingress-controller-nsx-alb-enterprise-edition)
+        - [L7 Ingress in ClusterIP Mode](#l7-ingress-in-clusterip-mode)
+      - [L4 LB Only (NSX ALB Essentials Edition)](#l4-lb-only-nsx-alb-essentials-edition)
   - [Deploying Guest Clusters](#deploying-guest-clusters)
     - [Create KubeConfig files for Cluster Access](#create-kubeconfig-files-for-cluster-access)
 
@@ -158,10 +166,13 @@ In this step, we are going to create IPAM and DNS profiles. The IPAM profile wil
 5. Go back to **Infrastructure > Clouds** and click on the Cloud we previously created.
 6. On the Infrastructure tab, select the IPAM and DNS profiles we just created.
   ![](images/avi-ctr-cloud-03.png)
-7. Go to **Infrastructure > Networks** and click on the edit button of the Front-End network (*mgmt-k8s-ingress*)
+7. Go to **Infrastructure > Networks > Select Cloud** and click on the edit button of the Front-End network (*mgmt-k8s-ingress*)
 8. Click on **+Add Subnet**, and fill in the CIDR of the Front-End network (*10.30.230.64/27*)
-9. The click on **+Add Static IP Address Pool**, and fill the IP range you want for your Front-End IP addresses (*10.30.230.66-10.30.230.90*)
+9. Then click on **+Add Static IP Address Pool**, and fill the IP range you want for your Front-End IP addresses (*10.30.230.66-10.30.230.90*)
   ![](images/avi-ctr-ipam-02.png)
+10. Go back to **Infrastructure > Networks > Select Cloud** and click on the edit button of the Management K8s network (*demo-tkg-12*)
+11. Tick the "DHCP Enabled Box"
+  ![](images/avi-ctr-ipam-03.png)
 
 ### SE Configuration
 AVI Service Engines will be deployed automatically, through AKO. We need to configure some settings to be sure that the SE will be deployed on the correct datastore, with a name we chose.
@@ -174,6 +185,14 @@ AVI Service Engines will be deployed automatically, through AKO. We need to conf
 Follow VMware's documentation for the certificate. There is no trap for this one
 
 ### License
+You can either have the essentials or the Enterprise license Tier.
+
+If you have the Enterprise license, you'll be able to use those features :
+- DNS Delegation
+- L7 Ingress through NSX ALB
+- GSLB
+- ...
+
 Follow VMware's documentation for License. There is no trap for this one
 
 ### Routing
@@ -187,7 +206,7 @@ Follow VMware's documentation for License. There is no trap for this one
 ### Docker installation
 
 1. First we need to update our repositories and install prerequisites
-    ```
+    ```bash
     sudo apt-get update
     sudo apt-get install \
         ca-certificates \
@@ -196,37 +215,41 @@ Follow VMware's documentation for License. There is no trap for this one
         lsb-release
     ```
 2. Add Docker’s official GPG key:
-    ```
+    ```bash
     curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
     ```
 3. Use the following command to set up the stable repository
-    ```
+    ```bash
     echo \
     "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu \
     $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
     ```
 4. Update the apt package index, and install the latest version of Docker Engine and containerd
-    ```
+    ```bash
     sudo apt-get update
     sudo apt-get install docker-ce docker-ce-cli containerd.io
     ```
 5. Add your user to the docker group
-    ```
+    ```bash
     sudo usermod -aG docker $USER
     ```
 6. Log out and log back in so that your group membership is re-evaluated
 7. Verify that you can run docker commands **without** sudo
-    ```
+    ```bash
     docker run hello-world
     ```
 
+### Helm Installation
 
-### Kubectl et Tanzu completion
-To allow autocompletion of both kubectl and tanzu commands, run the following commands (be sure to have executed kubectl and tanzu commands at least once before) :
-```
+1. Install helm following the official documentation : https://helm.sh/docs/intro/install/
+
+
+### Kubectl, Tanzu & Helm completion
+To allow autocompletion of kubectl, tanzu  and helm commands, run the following commands (be sure to have executed kubectl and tanzu commands at least once before) :
+```bash
 vmware@tkg-jump:~$ sudo apt install bash-completion
 ```
-```
+```bash
 vmware@tkg-jump:~$ kubectl completion bash > ~/.kube/completion.bash.inc
   printf "
   # Kubectl shell completion
@@ -234,11 +257,21 @@ vmware@tkg-jump:~$ kubectl completion bash > ~/.kube/completion.bash.inc
   " >> $HOME/.bash_profile
   source $HOME/.bash_profile
 ```
-```
+```bash
 vmware@tkg-jump:~$ tanzu completion bash > ~/.kube-tkg/completion.bash.inc
   printf "
   # Tanzu shell completion
   source '$HOME/.kube-tkg/completion.bash.inc'
+  " >> $HOME/.bash_profile
+  source $HOME/.bash_profile
+```
+
+```bash
+vmware@tkg-jump:~ mkdir ~/.helm
+vmware@tkg-jump:~$ helm completion bash > ~/.helm/completion.bash.inc
+  printf "
+  # Helm shell completion
+  source '$HOME/.helm/completion.bash.inc'
   " >> $HOME/.bash_profile
   source $HOME/.bash_profile
 ```
@@ -257,21 +290,21 @@ Before finishing and running the installation with the UI, we are going to use t
 
 #### SSH Port Forwarding
 If you run the UI installer on the VM or a Linux that doesn't have a browser, it can be helpful to redirect the port 8080 of the bootstrap VM to your machine. For this, execute the following command on **your machine**.
-```
+```bash
 ssh -L 8080:localhost:8080 vmware@10.30.228.17
 ```
 
 #### SSH Key
 
 To create an SSH Key pair that is going to be used for tanzu, follow these steps on a Linux machine :
-```
+```bash
 ssh-keygen -t ed25519 -C "vmware@tkg" -f ~/tkg
 ```
 Both public and private keys are created on the home folder under the name tkg and tkg.pub
 
 ### Deploy the management cluster
 1. On the bootstrap VM, execute the following command :
-  ```
+  ```bash
   tanzu management-cluster create --ui
   ```
 2. Access the UI with a web browser http://localhost:8080/#/ui (either on your machine or on the bootstrap VM. See Section [SSH Port Forwarding](#ssh-port-forwarding))
@@ -303,7 +336,7 @@ We are going to use it to deploy the management cluster with more verbosity.
 Copy the CLI command at the bottom of the page and paste it and execute it on your bootstrap VM.
 
 Example :
-```
+```bash
 tanzu management-cluster create --file /home/vmware/.config/tanzu/tkg/clusterconfigs/201puronh8.yaml -v 6
 ```
 
@@ -318,12 +351,12 @@ After the management cluster has been deployed, you need to execute some command
 ### Authenticate as admin on the Management Cluster
 
 1. Get the admin context 
-  ```
+  ```bash
   tanzu management-cluster kubeconfig get tkg-mgmt --admin
   ```
 2. The command line will return the command to authenticate to the management cluster as admin (creation of a Kubernetes context)
 3. Execute this command, e.g.
-  ```
+  ```bash
   kubectl config use-context tkg-mgmt-vsphere-20220106172239-admin@tkg-mgmt-vsphere-20220106172239
   ```
 
@@ -331,7 +364,7 @@ After the management cluster has been deployed, you need to execute some command
 
 1. After connecting to the management cluster as admin ([Connect to the Management Cluster](#authenticate-as-admin-on-the-management-cluster))
 2. Verify that all apps are reconciled successfully
-  ```
+  ```bash
   kubectl get apps -A
   ```
 
@@ -340,7 +373,7 @@ After the management cluster has been deployed, you need to execute some command
 After deploying the management cluster, we need to create a load balancer service for Pinniped.
 
 1. Create a file pinniped-supervisor-svc-overlay.yaml with the following content:
-  ```
+  ```yaml
   #@ load("@ytt:overlay", "overlay")
   #@overlay/match by=overlay.subset({"kind": "Service", "metadata": {"name": "pinniped-supervisor", "namespace": "pinniped-supervisor"}})
   ---
@@ -370,29 +403,158 @@ After deploying the management cluster, we need to create a load balancer servic
         targetPort: https
   ```
 2. Convert the file into a base64-encoded string:
-  ```
+  ```bash
   cat pinniped-supervisor-svc-overlay.yaml | base64 -w 0
   ```
 3. Get the name of the pinniped-addon secret :
-  ```
+  ```bash
   kubectl get secrets -n tkg-system | grep pinniped-addon
   ```   
 4. Patch the mgmt-pinniped-addon secret, which contains the Pinniped configuration values, with the overlay values (replace mgmt-pinniped-addon with the result of step 3 ; replace OVERLAY-BASE64 with the output of the step 2):
-  ```
+  ```bash
   kubectl patch secret mgmt-pinniped-addon -n tkg-system -p '{"data": {"overlays.yaml": "OVERLAY-BASE64"}}'
   ```
 5. After a few seconds, list the pinniped-supervisor (and dexsvc if using LDAP) services to confirm that they now have type LoadBalancer:
-  ```
+  ```bash
   kubectl get services -n pinniped-supervisor
   ```
 6. Delete pinniped-post-deploy-job to re-run it:
-  ```
+  ```bash
   kubectl delete jobs pinniped-post-deploy-job -n pinniped-supervisor
   ```
 7. Wait for the Pinniped post-deploy job to re-create, run, and complete, which may take a few minutes. You can check status by kubectl get job:
-  ```
+  ```bash
   kubectl get job pinniped-post-deploy-job -n pinniped-supervisor
   ```
+
+### Configure DNS Delegation (NSX ALB or External-DNS)
+
+#### NSX ALB (Enterprise Edition)
+If you use NSX ALB with Enterprise edition, you can enable the DNS service on it, and delegate part of the domain. 
+The purpose is that it'll automatically create the DNS record required when using Ingress services.
+
+Follow these steps to enable the DNS Service on AVI
+1. Go to **Administration > Settings > DNS Service > Create Virtual Service**
+2. Specify a name, the network where the VIP of the DNS server will reside (*mgmt-k8s-ingress*), and its IPv4 subnet. Check the "Ignore network reachability constraints for the server pool" box
+  ![](images/dns-delegation-avi-01.png)
+3. Click on Next on all other pages without changing the default configuration
+4. Verify the VIP that was choosen for the DNS Service, **Applications > VS VIPs**
+  ![](images/dns-delegation-avi-02.png)
+
+#### Windows DNS
+
+Once the DNS server is created on AVI, or that external-dns is configured, we need to create a new zone with delegation on windows DNS :
+1. Open the DNS Manager
+2. Extend the Forward Look Zone where you want to create you subzone, right-click on it and select **New Delegation**
+  ![](images/dns-delegation-windows-01.png)
+3. Fill in the name of the subzone you want to create
+  ![](images/dns-delegation-windows-02.png)
+4. Add the FQDN and the IP address of the DNS server which will manage this zone (for example, the AVI VIP)
+
+### Configure NSX ALB for Workload Clusters
+
+You can configure some parameters of NSX ALB for when it will be automatically deployed on TKG Guest clusters. 
+The main scenario where you'll want to do that is when you want to use NSX ALB as the Ingress of your K8s clusters.
+
+#### L7 Ingress controller (NSX ALB Enterprise Edition)
+There are 3 ways to configure NSX ALB as the default L7 ingress for Kubernetes :
+1. L7 Ingress in ClusterIP Mode
+2. L7 Ingress in NodePortLocal Mode (Not yet supported by VMware)
+3. L7 Ingress in NodePort Mode 
+
+As the 2nd method using NodePortLocal mode is not supported by VMware, we won't describe it.
+
+Methods 1 and 3 have their pros and cons. 
+
+**L7 Ingress in ClusterIP Mode**
+
+**Pros**
+  - ClusterIP used, so no need to change parameters when deploying apps through helm charts (default mode)
+  - Performance (an AVI SE for each Workload Cluster)
+
+**Cons**
+   - Each SE group can only be used by one workload cluster, so you need a dedicated AKODeploymentConfig per cluster for AKO to work in this mode.
+
+**L7 Ingress in NodePort Mode**
+
+**Pros**
+  - An AVI SE Group can host multiple TKG Guest Clusters
+
+**Cons**
+   - The services of your workloads must be set to NodePort instead of ClusterIP even when accompanied by an ingress object. This ensures that NodePorts are created on the worker nodes and traffic can flow through the SEs to the pods via the NodePorts.
+
+##### L7 Ingress in ClusterIP Mode
+
+1. Make sure you use an Enterprise License on your AVI Controller
+2. Create an AVI SE Group for each TKG Guest Cluster that will require AVI as the Ingress controller
+   1. Go to your AVI controller, then **Infrastructure > Service Engine Group > Select Cloud > Create**
+   ![](images/l7-se-group-1.png)
+   ![](images/l7-se-group-1.png)
+3. Set the context of kubectl to your management cluster
+   ```bash
+   kubectl config use-context tkg-mgmt-vsphere-20220106172239-admin@tkg-mgmt-vsphere-20220106172239
+   ```
+4. Create an AKODeploymentConfig YAML file for the new configuration. Set the parameters as shown in the following sample:
+  ```yaml
+  apiVersion: networking.tkg.tanzu.vmware.com/v1alpha1
+  kind: AKODeploymentConfig
+  metadata:
+    name: ako-shared-svc                                          # Change name
+  spec:
+    adminCredentialRef:
+      name: avi-controller-credentials
+      namespace: tkg-system-networking
+    certificateAuthorityRef:
+      name: avi-controller-ca
+      namespace: tkg-system-networking
+    cloudName: vcf-lab-m1-vc                                      # Change Cloud
+    clusterSelector:
+      matchLabels:
+        ako-l7-shared-svc: "true"                                   # Change LABEL
+    controller: vcf-lab-lb-ctr-vip.sddc.cce.ge                    # Change IP
+    dataNetwork:
+      cidr: 10.30.230.64/27                                       # Use CIDR of Front-End Network
+      name: mgmt-k8s-ingress                                      # Use Front-End Network
+    extraConfigs:
+      disableStaticRouteSync: false                               # required
+      image:
+        pullPolicy: IfNotPresent
+        repository: projects.registry.vmware.com/tkg/ako
+        version: v1.3.2_vmware.1
+      ingress:
+        disableIngressClass: false                                # required
+        nodeNetworkList:                                          # required
+          - cidrs:
+              - 10.30.231.0/24                                    # Use CIDR of K8s Management Network
+            networkName: demo-tkg-12                              # Use K8s Management Network
+        serviceType: ClusterIP                                    # required
+        shardVSSize: MEDIUM                                       # required
+    serviceEngineGroup: tkg-shared-svc-se                         # Change SE Group
+  ``` 
+  Where LABEL and LABEL-VALUE define the label and value needed to assign this configuration to a workload cluster in a later step. For example, ako-l7-clusterip-01: "true"
+5. Create the AKO Service
+  ```bash
+  kubectl apply -f ./ako-shared-svc.yaml
+  ```
+6. Label one of your workload clusters to match the selector. Do not label more than one workload cluster.
+  ```bash 
+  kubectl label cluster tkg-shared-svc ako-l7-shared-svc="true"
+  ```
+7. Set the context of kubectl to the workload cluster.
+  ```bash
+  kubectl config use-context tkg-shared-svc-admin@tkg-shared-svc
+  ```
+8. Run the following command to ensure that NodePort changed to ClusterIP. (It can take few minutes)
+  ```bash
+  watch "kubectl get cm avi-k8s-config -n avi-system -o=jsonpath='{.data.serviceType}'"
+  ``` 
+9.  Delete the AKO pod so it redeploys and reads the new configuration file.
+  ```bash
+  kubectl delete pod ako-0 -n avi-system
+  ```
+10. In the Avi Controller UI, go to **Applications > Virtual Services** to see an L7 virtual service similar to the following:
+
+#### L4 LB Only (NSX ALB Essentials Edition)
 
 ## Deploying Guest Clusters
 
