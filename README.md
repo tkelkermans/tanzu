@@ -33,11 +33,15 @@
     - [Pinniped](#pinniped)
     - [Configure DNS Delegation (NSX ALB or External-DNS)](#configure-dns-delegation-nsx-alb-or-external-dns)
       - [NSX ALB (Enterprise Edition)](#nsx-alb-enterprise-edition)
+      - [External-DNS](#external-dns)
       - [Windows DNS](#windows-dns)
     - [Configure NSX ALB for Workload Clusters](#configure-nsx-alb-for-workload-clusters)
       - [L7 Ingress controller (NSX ALB Enterprise Edition)](#l7-ingress-controller-nsx-alb-enterprise-edition)
         - [L7 Ingress in ClusterIP Mode](#l7-ingress-in-clusterip-mode)
       - [L4 LB Only (NSX ALB Essentials Edition)](#l4-lb-only-nsx-alb-essentials-edition)
+    - [Configure a wildcard certificate for Ingress Controller](#configure-a-wildcard-certificate-for-ingress-controller)
+      - [NSX-ALB as Ingress](#nsx-alb-as-ingress)
+      - [Contour as ingress](#contour-as-ingress)
   - [Deploying Guest Clusters](#deploying-guest-clusters)
     - [Create KubeConfig files for Cluster Access](#create-kubeconfig-files-for-cluster-access)
 
@@ -441,6 +445,9 @@ Follow these steps to enable the DNS Service on AVI
 4. Verify the VIP that was choosen for the DNS Service, **Applications > VS VIPs**
   ![](images/dns-delegation-avi-02.png)
 
+#### External-DNS
+*This section needs to be completed*
+
 #### Windows DNS
 
 Once the DNS server is created on AVI, or that external-dns is configured, we need to create a new zone with delegation on windows DNS :
@@ -450,6 +457,8 @@ Once the DNS server is created on AVI, or that external-dns is configured, we ne
 3. Fill in the name of the subzone you want to create
   ![](images/dns-delegation-windows-02.png)
 4. Add the FQDN and the IP address of the DNS server which will manage this zone (for example, the AVI VIP)
+
+**Do not pay attention at the error message for failed validation on step 4. VIP address for DNS on AVI controller is not pingable**
 
 ### Configure NSX ALB for Workload Clusters
 
@@ -555,6 +564,46 @@ Methods 1 and 3 have their pros and cons.
 10. In the Avi Controller UI, go to **Applications > Virtual Services** to see an L7 virtual service similar to the following:
 
 #### L4 LB Only (NSX ALB Essentials Edition)
+
+### Configure a wildcard certificate for Ingress Controller
+
+#### NSX-ALB as Ingress
+
+1. Gather a wildcard certificate for the subzone you created on [Configure DNS Delegation (NSX ALB or External-DNS)](#configure-dns-delegation-nsx-alb-or-external-dns)
+2. Convert the certificate and the key as base64
+   1. Extracting the private key from a PFX
+   ```bash
+   openssl pkcs12 -in wild-tkg-mgmt.pfx -nocerts -out wild.key
+   ```
+   2. Decrypting the private key
+   ```bash
+   openssl rsa -in wild.key -out wild.key
+   ```
+   3. Extracting the certificate from the PFX
+   ```bash
+   openssl pkcs12 -in wild-tkg-mgmt.pfx -clcerts -nokeys -out wild.pem
+   ```
+   4. Convert to bas64 string to be used in the YAML file
+   ```bash
+   cat wild.pem | base64
+   cat wild.key | base64
+   ```
+3. Create a secret with the name router-certs-default in the same namespace where the AKO pod is running (avi-system). Ensure that the secret has tls.crt and tls.key fields in the data section.
+  ```yaml
+  apiVersion: v1
+  kind: Secret
+  metadata:
+    name: router-certs-default
+    namespace: avi-system
+  type: kubernetes.io/tls
+  data:
+    tls.crt: LS0tLS1CRUdJTiB...LS0=                                      
+      
+    tls.key: LS0tLS1CRUdJTi...tCg==
+  ```
+4. Add the annotation ako.vmware.com/enable-tls in the required Ingresses and set its value to true
+
+#### Contour as ingress
 
 ## Deploying Guest Clusters
 
